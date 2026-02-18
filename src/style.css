@@ -54,6 +54,12 @@ body {
   letter-spacing: 0.02em;
 }
 
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.95rem;
+}
+
 #roll-btn {
   border: 0;
   min-height: 3rem;
@@ -73,13 +79,52 @@ body {
   opacity: 0.7;
 }
 
+.speed-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: min(32vw, 15rem);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.speed-control span {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+#speed-value {
+  min-width: 4ch;
+  text-align: right;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+#speed-slider {
+  width: min(32vw, 15rem);
+  accent-color: #fb7185;
+}
+
 @media (max-width: 820px) {
   .hud {
     flex-direction: column;
     align-items: stretch;
   }
 
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   #roll-btn {
     width: 100%;
+  }
+
+  .speed-control,
+  #speed-slider {
+    width: 100%;
+    min-width: 0;
   }
 }

@@ -1,10 +1,16 @@
 import "./style.css";
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
+import rollSoundUrl from "../roll.wav";
 
 const canvas = document.querySelector("#scene");
 const rollButton = document.querySelector("#roll-btn");
 const resultLabel = document.querySelector("#result");
+const speedSlider = document.querySelector("#speed-slider");
+const speedValue = document.querySelector("#speed-value");
+const rollSound = new Audio(rollSoundUrl);
+rollSound.preload = "auto";
+rollSound.volume = 0.75;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b1220);
@@ -51,9 +57,9 @@ floor.position.y = -1.5;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const arenaHalfSize = 3.2;
+const arenaHalfSize = 6.2;
 const wallThickness = 0.3;
-const wallHeight = 40.5;
+const wallHeight = 3.5;
 const wallCenterY = floor.position.y + wallHeight / 2;
 
 const boundaryMaterial = new THREE.MeshStandardMaterial({
@@ -239,11 +245,24 @@ const resetDice = () => {
 
 let isRolling = false;
 let stableFrames = 0;
+let simulationSpeed = 1;
+
+const updateSimulationSpeed = (value) => {
+  const parsed = Number.parseFloat(value);
+  simulationSpeed = Number.isFinite(parsed) ? THREE.MathUtils.clamp(parsed, 0.25, 2.5) : 1;
+  speedSlider.value = simulationSpeed.toFixed(2);
+  speedValue.textContent = `${simulationSpeed.toFixed(2)}x`;
+};
 
 const rollDice = () => {
   if (isRolling) {
     return;
   }
+
+  rollSound.currentTime = 0;
+  rollSound.play().catch(() => {
+    // Ignore blocked autoplay errors; button click usually allows playback.
+  });
 
   isRolling = true;
   stableFrames = 0;
@@ -303,8 +322,8 @@ const desiredCameraPosition = new THREE.Vector3(0, 0, 0);
 const animate = () => {
   requestAnimationFrame(animate);
 
-  const dt = Math.min(clock.getDelta(), 0.05);
-  world.step(1 / 60, dt, 3);
+  const dt = Math.min(clock.getDelta() * simulationSpeed, 0.12);
+  world.step(1 / 60, dt, 5);
 
   diceMesh.position.copy(diceBody.position);
   diceMesh.quaternion.copy(diceBody.quaternion);
@@ -327,13 +346,15 @@ const onResize = () => {
 
 window.addEventListener("resize", onResize);
 rollButton.addEventListener("click", rollDice);
+speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.target.value));
+updateSimulationSpeed(speedSlider.value);
 
 resetDice();
 animate();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js").catch((error) => {
+    navigator.serviceWorker.register("./service-worker.js").catch((error) => {
       console.warn("Service worker registration failed:", error);
     });
   });

@@ -4,7 +4,7 @@ Single-die 3D roller built for touch devices (including iPad) with:
 
 - `three` for rendering
 - `cannon-es` for dice physics
-- PWA install support via `manifest.webmanifest` + service worker
+- PWA install support via `manifest.json` + service worker
 
 ## Run
 
