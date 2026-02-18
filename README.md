@@ -20,6 +20,11 @@ npm run build
 npm run preview
 ```
 
+## Deploy notes
+
+- GitHub Pages subpath hosting is supported (`vite.config.js` uses `base: "./"`).
+- Root `index.html` is also self-contained for static hosting and uses local `vendor/` modules.
+
 ## iPad usage
 
 1. Open the deployed app in Safari.

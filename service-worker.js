@@ -6,7 +6,12 @@ const APP_SHELL = [
   "./apple-touch-icon.png",
   "./icon-192.png",
   "./icon-512.png",
-  "./icon.svg"
+  "./icon.svg",
+  "./roll.wav",
+  "./src/main.js",
+  "./src/style.css",
+  "./vendor/cannon-es.js",
+  "./vendor/three.module.js"
 ];
 
 self.addEventListener("install", (event) => {
