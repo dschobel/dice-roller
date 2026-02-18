@@ -1,14 +1,12 @@
-import "./style.css";
-import * as CANNON from "cannon-es";
-import * as THREE from "three";
-import rollSoundUrl from "../roll.wav";
+import * as CANNON from "../node_modules/cannon-es/dist/cannon-es.js";
+import * as THREE from "../node_modules/three/build/three.module.js";
 
 const canvas = document.querySelector("#scene");
 const rollButton = document.querySelector("#roll-btn");
 const resultLabel = document.querySelector("#result");
 const speedSlider = document.querySelector("#speed-slider");
 const speedValue = document.querySelector("#speed-value");
-const rollSound = new Audio(rollSoundUrl);
+const rollSound = new Audio(new URL("../roll.wav", import.meta.url).href);
 rollSound.preload = "auto";
 rollSound.volume = 0.75;
 
