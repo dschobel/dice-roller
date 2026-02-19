@@ -448,6 +448,58 @@ const cameraOffset = new THREE.Vector3(4.7, 4.5, 5.4);
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 const desiredTarget = new THREE.Vector3(0, 0, 0);
 const desiredCameraPosition = new THREE.Vector3(0, 0, 0);
+const tapRaycaster = new THREE.Raycaster();
+const tapPointer = new THREE.Vector2();
+const tapState = {
+  pointerId: null,
+  startX: 0,
+  startY: 0
+};
+const tapMoveThresholdPx = 14;
+
+const updateTapRay = (clientX, clientY) => {
+  const rect = canvas.getBoundingClientRect();
+  tapPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  tapRaycaster.setFromCamera(tapPointer, camera);
+};
+
+const tryRollFromTap = (clientX, clientY) => {
+  updateTapRay(clientX, clientY);
+  const hits = tapRaycaster.intersectObjects([shimmerMesh, diceMesh], false);
+  if (hits.length > 0) {
+    rollDice();
+  }
+};
+
+const onCanvasPointerDown = (event) => {
+  if (event.pointerType === "mouse" && event.button !== 0) {
+    return;
+  }
+
+  tapState.pointerId = event.pointerId;
+  tapState.startX = event.clientX;
+  tapState.startY = event.clientY;
+};
+
+const onCanvasPointerUp = (event) => {
+  if (event.pointerId !== tapState.pointerId) {
+    return;
+  }
+
+  tapState.pointerId = null;
+  const dx = event.clientX - tapState.startX;
+  const dy = event.clientY - tapState.startY;
+  if (dx * dx + dy * dy > tapMoveThresholdPx * tapMoveThresholdPx) {
+    return;
+  }
+
+  tryRollFromTap(event.clientX, event.clientY);
+};
+
+const clearTapState = () => {
+  tapState.pointerId = null;
+};
 
 const animate = () => {
   requestAnimationFrame(animate);
@@ -481,6 +533,10 @@ const onResize = () => {
 
 window.addEventListener("resize", onResize);
 rollButton.addEventListener("click", rollDice);
+canvas.addEventListener("pointerdown", onCanvasPointerDown);
+canvas.addEventListener("pointerup", onCanvasPointerUp);
+canvas.addEventListener("pointercancel", clearTapState);
+canvas.addEventListener("pointerleave", clearTapState);
 speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.target.value));
 updateSimulationSpeed(speedSlider.value);
 
