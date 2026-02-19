@@ -16,7 +16,7 @@ tromboneSound.volume = 0.82;
 
 const critterConfig = {
   modelUrl: new URL("../blackrat/blackrat.glb", import.meta.url).href,
-  count: 3,
+  count: 5,
   walkClipIndex: 0,
   interactionMode: "visual",
   wanderRadius: 18,
@@ -27,7 +27,11 @@ const critterConfig = {
   pauseMin: 0.12,
   pauseMax: 0.9,
   reachDistance: 0.7,
-  targetLongestSide: 14.5
+  targetLongestSide: 11.6,
+  diceAvoidPadding: 0.62,
+  diceSteerWeight: 1.9,
+  diceResolveFactor: 0.74,
+  diceRepelVelocity: 2.1
 };
 
 const critterRuntime = {
@@ -35,7 +39,11 @@ const critterRuntime = {
   baseY: -1.48,
   entities: [],
   walkClip: null,
-  scratchMove: new THREE.Vector3()
+  collisionRadius: 1.1,
+  collisionHalfHeight: 0.9,
+  diceCollisionRadius: Math.sqrt(3) * 0.5,
+  scratchMove: new THREE.Vector3(),
+  scratchSteer: new THREE.Vector3()
 };
 
 const scene = new THREE.Scene();
@@ -256,6 +264,11 @@ const prepareCritterTemplate = (rawTemplate) => {
   rawTemplate.position.y += floor.position.y - alignedBounds.min.y + 0.01;
   rawTemplate.updateMatrixWorld(true);
 
+  const finalBounds = new THREE.Box3().setFromObject(rawTemplate);
+  const finalSize = finalBounds.getSize(new THREE.Vector3());
+  const horizontalSpan = Math.max(finalSize.x, finalSize.z);
+  critterRuntime.collisionRadius = THREE.MathUtils.clamp(horizontalSpan * 0.2, 0.85, 6.4);
+  critterRuntime.collisionHalfHeight = THREE.MathUtils.clamp(finalSize.y * 0.45, 0.75, 8);
   critterRuntime.baseY = rawTemplate.position.y;
   return rawTemplate;
 };
@@ -268,12 +281,14 @@ const setNextCritterTarget = (entity, { minRadius = 0 } = {}) => {
 
 const spawnCritters = (template, walkClip) => {
   clearCritters();
+  const minSpawnRadius =
+    critterRuntime.collisionRadius + critterRuntime.diceCollisionRadius + critterConfig.diceAvoidPadding + 0.8;
 
   for (let i = 0; i < critterConfig.count; i += 1) {
     const root = cloneSkinned(template);
     root.position.set(0, critterRuntime.baseY, 0);
     root.rotation.y = Math.random() * Math.PI * 2;
-    getRandomWanderTarget(root.position, 3.5);
+    getRandomWanderTarget(root.position, minSpawnRadius);
     root.position.y = critterRuntime.baseY;
 
     const mixer = new THREE.AnimationMixer(root);
@@ -296,6 +311,57 @@ const spawnCritters = (template, walkClip) => {
     critterRuntime.entities.push(entity);
     critterGroup.add(root);
   }
+};
+
+const buildDiceAvoidance = (entity, allowPushOut = true) => {
+  const heightLimit = critterRuntime.collisionHalfHeight + critterRuntime.diceCollisionRadius + 0.55;
+  if (Math.abs(diceBody.position.y - critterRuntime.baseY) > heightLimit) {
+    return null;
+  }
+
+  const avoidRadius = critterRuntime.collisionRadius + critterRuntime.diceCollisionRadius + critterConfig.diceAvoidPadding;
+  const influenceRadius = avoidRadius * 2.2;
+  const dx = entity.root.position.x - diceBody.position.x;
+  const dz = entity.root.position.z - diceBody.position.z;
+  const distanceSq = dx * dx + dz * dz;
+
+  if (distanceSq > influenceRadius * influenceRadius) {
+    return null;
+  }
+
+  let distance = Math.sqrt(distanceSq);
+  let awayX;
+  let awayZ;
+
+  if (distance < 1e-4) {
+    const angle = Math.random() * Math.PI * 2;
+    awayX = Math.cos(angle);
+    awayZ = Math.sin(angle);
+    distance = 0;
+  } else {
+    awayX = dx / distance;
+    awayZ = dz / distance;
+  }
+
+  if (allowPushOut && distance < avoidRadius) {
+    const pushOut = avoidRadius - distance + 0.001;
+    entity.root.position.x += awayX * pushOut;
+    entity.root.position.z += awayZ * pushOut;
+    entity.root.position.y = critterRuntime.baseY;
+    entity.target.set(
+      entity.root.position.x + awayX * randomInRange(2.1, 5.3),
+      critterRuntime.baseY,
+      entity.root.position.z + awayZ * randomInRange(2.1, 5.3)
+    );
+    entity.pauseTime = 0;
+  }
+
+  const proximity = distance < avoidRadius ? 1 : THREE.MathUtils.clamp((influenceRadius - distance) / (influenceRadius - avoidRadius), 0, 1);
+  if (proximity <= 0) {
+    return null;
+  }
+
+  return { awayX, awayZ, proximity };
 };
 
 const loadCritters = async () => {
@@ -334,7 +400,23 @@ const updateCrittersVisual = (deltaSeconds) => {
       continue;
     }
 
-    const desiredYaw = Math.atan2(toTarget.x, toTarget.z);
+    const steer = critterRuntime.scratchSteer;
+    steer.copy(toTarget).multiplyScalar(1 / Math.max(distance, 1e-4));
+
+    const avoidance = buildDiceAvoidance(entity, true);
+    if (avoidance) {
+      const weightedProximity = avoidance.proximity * critterConfig.diceSteerWeight;
+      steer.x += avoidance.awayX * weightedProximity;
+      steer.z += avoidance.awayZ * weightedProximity;
+    }
+
+    if (steer.lengthSq() < 1e-5) {
+      steer.set(Math.sin(entity.root.rotation.y), 0, Math.cos(entity.root.rotation.y));
+    } else {
+      steer.normalize();
+    }
+
+    const desiredYaw = Math.atan2(steer.x, steer.z);
     const yawDelta = normalizeAngle(desiredYaw - entity.root.rotation.y);
     const maxTurn = entity.turnRate * deltaSeconds;
     entity.root.rotation.y += THREE.MathUtils.clamp(yawDelta, -maxTurn, maxTurn);
@@ -344,6 +426,57 @@ const updateCrittersVisual = (deltaSeconds) => {
     entity.root.position.x += Math.sin(entity.root.rotation.y) * step;
     entity.root.position.z += Math.cos(entity.root.rotation.y) * step;
     entity.root.position.y = critterRuntime.baseY;
+  }
+};
+
+const resolveDiceCritterOverlap = () => {
+  if (!critterRuntime.isReady) {
+    return;
+  }
+
+  const heightLimit = critterRuntime.collisionHalfHeight + critterRuntime.diceCollisionRadius + 0.55;
+  if (Math.abs(diceBody.position.y - critterRuntime.baseY) > heightLimit) {
+    return;
+  }
+
+  const minDistance = critterRuntime.collisionRadius + critterRuntime.diceCollisionRadius + critterConfig.diceAvoidPadding;
+  const minDistanceSq = minDistance * minDistance;
+  let pushed = false;
+
+  for (const entity of critterRuntime.entities) {
+    const dx = diceBody.position.x - entity.root.position.x;
+    const dz = diceBody.position.z - entity.root.position.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq >= minDistanceSq) {
+      continue;
+    }
+
+    let distance = Math.sqrt(distanceSq);
+    let nx;
+    let nz;
+    if (distance < 1e-4) {
+      const angle = Math.random() * Math.PI * 2;
+      nx = Math.cos(angle);
+      nz = Math.sin(angle);
+      distance = 0;
+    } else {
+      nx = dx / distance;
+      nz = dz / distance;
+    }
+
+    const overlap = Math.min(minDistance - distance, minDistance * 0.42);
+    const positionPush = overlap * critterConfig.diceResolveFactor;
+    diceBody.position.x += nx * positionPush;
+    diceBody.position.z += nz * positionPush;
+
+    const velocityPush = overlap * critterConfig.diceRepelVelocity;
+    diceBody.velocity.x += nx * velocityPush;
+    diceBody.velocity.z += nz * velocityPush;
+    pushed = true;
+  }
+
+  if (pushed) {
+    diceBody.wakeUp();
   }
 };
 
@@ -899,6 +1032,8 @@ const animate = () => {
   const realDelta = Math.min(clock.getDelta(), 0.05);
   const physicsDelta = Math.min(realDelta * simulationSpeed, 0.12);
   world.step(1 / 60, physicsDelta, 5);
+  updateCritters(realDelta);
+  resolveDiceCritterOverlap();
 
   diceMesh.position.copy(diceBody.position);
   diceMesh.quaternion.copy(diceBody.quaternion);
@@ -907,7 +1042,6 @@ const animate = () => {
   shimmerUniforms.uTime.value += realDelta;
   updateCelebration(realDelta);
   updateFireworks(realDelta);
-  updateCritters(realDelta);
 
   desiredTarget.set(diceMesh.position.x, Math.max(-0.2, diceMesh.position.y * 0.2), diceMesh.position.z);
   cameraTarget.lerp(desiredTarget, 0.1);
