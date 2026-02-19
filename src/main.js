@@ -31,7 +31,19 @@ const critterConfig = {
   diceAvoidPadding: 0.62,
   diceSteerWeight: 1.9,
   diceResolveFactor: 0.74,
-  diceRepelVelocity: 2.1
+  diceRepelVelocity: 2.1,
+  diceMovingThreshold: 0.58,
+  diceRestThreshold: 0.24,
+  attractDistanceMin: 6.3,
+  attractDistanceMax: 11.4,
+  attractSnapDistance: 14.5,
+  attractRetargetMin: 0.9,
+  attractRetargetMax: 2.2,
+  scatterDistanceMin: 12.5,
+  scatterDistanceMax: 17.5,
+  scatterUrgentDistance: 9.2,
+  scatterRetargetMin: 0.24,
+  scatterRetargetMax: 0.75
 };
 
 const critterRuntime = {
@@ -39,6 +51,8 @@ const critterRuntime = {
   baseY: -1.48,
   entities: [],
   walkClip: null,
+  diceIsMoving: false,
+  diceMotion: 0,
   collisionRadius: 1.1,
   collisionHalfHeight: 0.9,
   diceCollisionRadius: Math.sqrt(3) * 0.5,
@@ -273,10 +287,57 @@ const prepareCritterTemplate = (rawTemplate) => {
   return rawTemplate;
 };
 
-const setNextCritterTarget = (entity, { minRadius = 0 } = {}) => {
-  getRandomWanderTarget(entity.target, minRadius);
-  entity.speed = randomInRange(critterConfig.moveSpeedMin, critterConfig.moveSpeedMax);
-  entity.turnRate = randomInRange(critterConfig.turnRateMin, critterConfig.turnRateMax);
+const clampCritterTargetToArena = (target) => {
+  const maxRadius = critterConfig.wanderRadius * 0.98;
+  const distanceSq = target.x * target.x + target.z * target.z;
+  if (distanceSq > maxRadius * maxRadius) {
+    const scale = maxRadius / Math.sqrt(distanceSq);
+    target.x *= scale;
+    target.z *= scale;
+  }
+  target.y = critterRuntime.baseY;
+};
+
+const setAttractTarget = (entity) => {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = randomInRange(critterConfig.attractDistanceMin, critterConfig.attractDistanceMax);
+  entity.target.set(
+    diceBody.position.x + Math.cos(angle) * radius,
+    critterRuntime.baseY,
+    diceBody.position.z + Math.sin(angle) * radius
+  );
+  clampCritterTargetToArena(entity.target);
+  entity.speed = randomInRange(critterConfig.moveSpeedMin * 0.72, critterConfig.moveSpeedMax * 1.08);
+  entity.turnRate = randomInRange(critterConfig.turnRateMin * 0.82, critterConfig.turnRateMax * 1.08);
+  entity.behaviorTimer = randomInRange(critterConfig.attractRetargetMin, critterConfig.attractRetargetMax);
+};
+
+const setScatterTarget = (entity, awayX, awayZ, distanceFromDice) => {
+  let nx = awayX;
+  let nz = awayZ;
+  if (distanceFromDice < 1e-4) {
+    const angle = Math.random() * Math.PI * 2;
+    nx = Math.cos(angle);
+    nz = Math.sin(angle);
+  } else {
+    const inverseDistance = 1 / distanceFromDice;
+    nx *= inverseDistance;
+    nz *= inverseDistance;
+  }
+
+  const desiredDistance = randomInRange(critterConfig.scatterDistanceMin, critterConfig.scatterDistanceMax);
+  const spread = randomInRange(2.2, 4.8);
+  const finalDistance = Math.max(desiredDistance, distanceFromDice + spread);
+  entity.target.set(
+    diceBody.position.x + nx * finalDistance,
+    critterRuntime.baseY,
+    diceBody.position.z + nz * finalDistance
+  );
+  clampCritterTargetToArena(entity.target);
+  entity.speed = randomInRange(critterConfig.moveSpeedMin * 1.3, critterConfig.moveSpeedMax * 2.05);
+  entity.turnRate = randomInRange(critterConfig.turnRateMin * 1.3, critterConfig.turnRateMax * 1.9);
+  entity.pauseTime = 0;
+  entity.behaviorTimer = randomInRange(critterConfig.scatterRetargetMin, critterConfig.scatterRetargetMax);
 };
 
 const spawnCritters = (template, walkClip) => {
@@ -304,9 +365,10 @@ const spawnCritters = (template, walkClip) => {
       target: new THREE.Vector3(),
       speed: 0,
       turnRate: 0,
-      pauseTime: randomInRange(0, 0.6)
+      pauseTime: randomInRange(0, 0.6),
+      behaviorTimer: randomInRange(0.2, 1.1)
     };
-    setNextCritterTarget(entity, { minRadius: 2.2 });
+    setAttractTarget(entity);
 
     critterRuntime.entities.push(entity);
     critterGroup.add(root);
@@ -376,18 +438,50 @@ const loadCritters = async () => {
   }
 };
 
+const updateCritterMovementState = () => {
+  critterRuntime.diceMotion = diceBody.velocity.length() + diceBody.angularVelocity.length();
+  if (critterRuntime.diceIsMoving) {
+    if (critterRuntime.diceMotion < critterConfig.diceRestThreshold) {
+      critterRuntime.diceIsMoving = false;
+    }
+  } else if (critterRuntime.diceMotion > critterConfig.diceMovingThreshold) {
+    critterRuntime.diceIsMoving = true;
+  }
+};
+
 const updateCrittersVisual = (deltaSeconds) => {
+  updateCritterMovementState();
+
   const maxRadiusSq = (critterConfig.wanderRadius + 3) * (critterConfig.wanderRadius + 3);
+  const diceMoving = critterRuntime.diceIsMoving;
+  const diceX = diceBody.position.x;
+  const diceZ = diceBody.position.z;
+
   for (const entity of critterRuntime.entities) {
     entity.mixer.update(deltaSeconds);
+    entity.behaviorTimer = Math.max(0, entity.behaviorTimer - deltaSeconds);
 
-    if (entity.pauseTime > 0) {
+    const fromDiceX = entity.root.position.x - diceX;
+    const fromDiceZ = entity.root.position.z - diceZ;
+    const distanceFromDice = Math.hypot(fromDiceX, fromDiceZ);
+
+    if (diceMoving) {
+      entity.pauseTime = 0;
+      if (entity.behaviorTimer <= 0 || distanceFromDice < critterConfig.scatterUrgentDistance) {
+        setScatterTarget(entity, fromDiceX, fromDiceZ, distanceFromDice);
+      }
+    } else if (entity.behaviorTimer <= 0 || distanceFromDice > critterConfig.attractSnapDistance) {
+      setAttractTarget(entity);
+    }
+
+    if (!diceMoving && entity.pauseTime > 0) {
       entity.pauseTime -= deltaSeconds;
       continue;
     }
 
     if (entity.root.position.x * entity.root.position.x + entity.root.position.z * entity.root.position.z > maxRadiusSq) {
       entity.target.set(0, critterRuntime.baseY, 0);
+      entity.behaviorTimer = 0;
     }
 
     const toTarget = critterRuntime.scratchMove;
@@ -395,8 +489,12 @@ const updateCrittersVisual = (deltaSeconds) => {
     const distance = toTarget.length();
 
     if (distance < critterConfig.reachDistance) {
-      entity.pauseTime = randomInRange(critterConfig.pauseMin, critterConfig.pauseMax);
-      setNextCritterTarget(entity, { minRadius: 1.5 });
+      if (diceMoving) {
+        setScatterTarget(entity, fromDiceX, fromDiceZ, distanceFromDice);
+      } else {
+        entity.pauseTime = randomInRange(critterConfig.pauseMin, critterConfig.pauseMax);
+        setAttractTarget(entity);
+      }
       continue;
     }
 
@@ -405,7 +503,8 @@ const updateCrittersVisual = (deltaSeconds) => {
 
     const avoidance = buildDiceAvoidance(entity, true);
     if (avoidance) {
-      const weightedProximity = avoidance.proximity * critterConfig.diceSteerWeight;
+      const baseWeight = diceMoving ? critterConfig.diceSteerWeight * 1.85 : critterConfig.diceSteerWeight * 0.68;
+      const weightedProximity = avoidance.proximity * baseWeight;
       steer.x += avoidance.awayX * weightedProximity;
       steer.z += avoidance.awayZ * weightedProximity;
     }
@@ -441,6 +540,7 @@ const resolveDiceCritterOverlap = () => {
 
   const minDistance = critterRuntime.collisionRadius + critterRuntime.diceCollisionRadius + critterConfig.diceAvoidPadding;
   const minDistanceSq = minDistance * minDistance;
+  const shouldRepelDice = critterRuntime.diceIsMoving || isRolling;
   let pushed = false;
 
   for (const entity of critterRuntime.entities) {
@@ -465,14 +565,23 @@ const resolveDiceCritterOverlap = () => {
     }
 
     const overlap = Math.min(minDistance - distance, minDistance * 0.42);
-    const positionPush = overlap * critterConfig.diceResolveFactor;
-    diceBody.position.x += nx * positionPush;
-    diceBody.position.z += nz * positionPush;
+    if (shouldRepelDice) {
+      const positionPush = overlap * critterConfig.diceResolveFactor;
+      diceBody.position.x += nx * positionPush;
+      diceBody.position.z += nz * positionPush;
 
-    const velocityPush = overlap * critterConfig.diceRepelVelocity;
-    diceBody.velocity.x += nx * velocityPush;
-    diceBody.velocity.z += nz * velocityPush;
-    pushed = true;
+      const velocityPush = overlap * critterConfig.diceRepelVelocity;
+      diceBody.velocity.x += nx * velocityPush;
+      diceBody.velocity.z += nz * velocityPush;
+      pushed = true;
+    } else {
+      entity.root.position.x -= nx * overlap;
+      entity.root.position.z -= nz * overlap;
+      entity.root.position.y = critterRuntime.baseY;
+      clampCritterTargetToArena(entity.root.position);
+      entity.pauseTime = 0;
+      entity.behaviorTimer = 0;
+    }
   }
 
   if (pushed) {
@@ -933,6 +1042,8 @@ const rollDice = () => {
     (Math.random() - 0.5) * 20,
     (Math.random() - 0.5) * 20
   );
+  critterRuntime.diceIsMoving = true;
+  critterRuntime.diceMotion = diceBody.velocity.length() + diceBody.angularVelocity.length();
 };
 
 const finishRollIfStable = () => {
