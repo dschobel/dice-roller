@@ -3,6 +3,7 @@ import * as THREE from "../vendor/three.module.js";
 
 const canvas = document.querySelector("#scene");
 const rollButton = document.querySelector("#roll-btn");
+const colorButton = document.querySelector("#color-btn");
 const resultLabel = document.querySelector("#result");
 const speedSlider = document.querySelector("#speed-slider");
 const speedValue = document.querySelector("#speed-value");
@@ -84,17 +85,27 @@ for (const [x, y, z, geometry] of boundaryWalls) {
   scene.add(wallMesh);
 }
 
-const createFaceTexture = (value) => {
+const createPastelPalette = () => {
+  const baseHue = Math.random() * 360;
+  return Array.from({ length: 6 }, (_, index) => {
+    const hue = (baseHue + index * 60 + (Math.random() - 0.5) * 18 + 360) % 360;
+    const saturation = 56 + Math.random() * 14;
+    const lightness = 78 + Math.random() * 10;
+    return `hsl(${hue.toFixed(0)} ${saturation.toFixed(0)}% ${lightness.toFixed(0)}%)`;
+  });
+};
+
+const createFaceTexture = (value, backgroundColor) => {
   const size = 512;
   const tCanvas = document.createElement("canvas");
   tCanvas.width = size;
   tCanvas.height = size;
   const ctx = tCanvas.getContext("2d");
 
-  ctx.fillStyle = "#fff8e7";
+  ctx.fillStyle = backgroundColor;
   ctx.fillRect(0, 0, size, size);
 
-  ctx.strokeStyle = "#d4d4d8";
+  ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
   ctx.lineWidth = 24;
   ctx.strokeRect(14, 14, size - 28, size - 28);
 
@@ -111,10 +122,11 @@ const createFaceTexture = (value) => {
 };
 
 const faceValues = [3, 4, 1, 6, 2, 5];
+const faceColors = createPastelPalette();
 const diceMaterials = faceValues.map(
-  (value) =>
+  (value, index) =>
     new THREE.MeshStandardMaterial({
-      map: createFaceTexture(value),
+      map: createFaceTexture(value, faceColors[index]),
       roughness: 0.36,
       metalness: 0.08
     })
@@ -228,6 +240,19 @@ const getTopFaceValue = () => {
     }
   }
   return top;
+};
+
+const randomizeDiceFaceColors = () => {
+  const nextColors = createPastelPalette();
+  for (let i = 0; i < diceMaterials.length; i += 1) {
+    const nextTexture = createFaceTexture(faceValues[i], nextColors[i]);
+    const previousTexture = diceMaterials[i].map;
+    diceMaterials[i].map = nextTexture;
+    diceMaterials[i].needsUpdate = true;
+    if (previousTexture) {
+      previousTexture.dispose();
+    }
+  }
 };
 
 const resetDice = () => {
@@ -344,6 +369,7 @@ const onResize = () => {
 
 window.addEventListener("resize", onResize);
 rollButton.addEventListener("click", rollDice);
+colorButton.addEventListener("click", randomizeDiceFaceColors);
 speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.target.value));
 updateSimulationSpeed(speedSlider.value);
 
