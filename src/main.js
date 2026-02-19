@@ -257,6 +257,155 @@ const shimmerMesh = new THREE.Mesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), shim
 shimmerMesh.renderOrder = 2;
 scene.add(shimmerMesh);
 
+const fireworksGroup = new THREE.Group();
+scene.add(fireworksGroup);
+
+const fireworksBursts = [];
+const celebration = {
+  active: false,
+  elapsed: 0,
+  nextBurstAt: 0,
+  duration: 3.8
+};
+const baseDirLightIntensity = 1.55;
+
+const createFireworkBurst = (origin, particleCount = 160) => {
+  const positions = new Float32Array(particleCount * 3);
+  const velocities = new Float32Array(particleCount * 3);
+  const colors = new Float32Array(particleCount * 3);
+  const color = new THREE.Color();
+
+  for (let i = 0; i < particleCount; i += 1) {
+    const i3 = i * 3;
+    positions[i3] = origin.x;
+    positions[i3 + 1] = origin.y;
+    positions[i3 + 2] = origin.z;
+
+    const u = Math.random() * 2 - 1;
+    const theta = Math.random() * Math.PI * 2;
+    const radial = Math.sqrt(1 - u * u);
+    const speed = 2.6 + Math.random() * 4.4;
+
+    velocities[i3] = radial * Math.cos(theta) * speed;
+    velocities[i3 + 1] = (u * 0.7 + 0.7) * speed;
+    velocities[i3 + 2] = radial * Math.sin(theta) * speed;
+
+    color.setHSL(Math.random(), 0.9, 0.64 + Math.random() * 0.12);
+    colors[i3] = color.r;
+    colors[i3 + 1] = color.g;
+    colors[i3 + 2] = color.b;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  const positionAttribute = new THREE.BufferAttribute(positions, 3);
+  geometry.setAttribute("position", positionAttribute);
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  const material = new THREE.PointsMaterial({
+    size: 0.14,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  const points = new THREE.Points(geometry, material);
+  fireworksGroup.add(points);
+
+  fireworksBursts.push({
+    points,
+    positionAttribute,
+    velocities,
+    age: 0,
+    life: 1.5 + Math.random() * 0.9
+  });
+};
+
+const clearFireworks = () => {
+  for (const burst of fireworksBursts) {
+    fireworksGroup.remove(burst.points);
+    burst.points.geometry.dispose();
+    burst.points.material.dispose();
+  }
+  fireworksBursts.length = 0;
+};
+
+const updateFireworks = (deltaSeconds) => {
+  for (let b = fireworksBursts.length - 1; b >= 0; b -= 1) {
+    const burst = fireworksBursts[b];
+    burst.age += deltaSeconds;
+    const t = burst.age / burst.life;
+
+    if (t >= 1) {
+      fireworksGroup.remove(burst.points);
+      burst.points.geometry.dispose();
+      burst.points.material.dispose();
+      fireworksBursts.splice(b, 1);
+      continue;
+    }
+
+    const positions = burst.positionAttribute.array;
+    for (let i = 0; i < positions.length; i += 3) {
+      burst.velocities[i] *= 0.985;
+      burst.velocities[i + 1] *= 0.982;
+      burst.velocities[i + 2] *= 0.985;
+      burst.velocities[i + 1] -= 7.4 * deltaSeconds;
+
+      positions[i] += burst.velocities[i] * deltaSeconds;
+      positions[i + 1] += burst.velocities[i + 1] * deltaSeconds;
+      positions[i + 2] += burst.velocities[i + 2] * deltaSeconds;
+    }
+
+    burst.positionAttribute.needsUpdate = true;
+    burst.points.material.opacity = (1 - t) * (1 - t);
+    burst.points.material.size = 0.1 + (1 - t) * 0.08;
+  }
+};
+
+const triggerSixCelebration = () => {
+  celebration.active = true;
+  celebration.elapsed = 0;
+  celebration.nextBurstAt = 0;
+  resultLabel.classList.add("celebrate");
+};
+
+const stopCelebration = ({ clearBursts = false } = {}) => {
+  celebration.active = false;
+  celebration.elapsed = 0;
+  celebration.nextBurstAt = 0;
+  resultLabel.classList.remove("celebrate");
+  dirLight.intensity = baseDirLightIntensity;
+  if (clearBursts) {
+    clearFireworks();
+  }
+};
+
+const updateCelebration = (deltaSeconds) => {
+  if (!celebration.active) {
+    return;
+  }
+
+  celebration.elapsed += deltaSeconds;
+
+  while (celebration.elapsed >= celebration.nextBurstAt && celebration.nextBurstAt < celebration.duration) {
+    const burstOrigin = new THREE.Vector3(
+      diceMesh.position.x + (Math.random() - 0.5) * 4.2,
+      floor.position.y + 1.8 + Math.random() * 2.7,
+      diceMesh.position.z + (Math.random() - 0.5) * 4.2
+    );
+    createFireworkBurst(burstOrigin, 140 + Math.floor(Math.random() * 80));
+    celebration.nextBurstAt += 0.15 + Math.random() * 0.2;
+  }
+
+  const pulse = Math.sin(celebration.elapsed * 18) * 0.3 + Math.sin(celebration.elapsed * 7.5) * 0.22;
+  dirLight.intensity = baseDirLightIntensity + Math.max(pulse, -0.1);
+
+  if (celebration.elapsed >= celebration.duration) {
+    stopCelebration();
+  }
+};
+
 const world = new CANNON.World({
   gravity: new CANNON.Vec3(0, -9.82, 0)
 });
@@ -389,6 +538,7 @@ const rollDice = () => {
     return;
   }
 
+  stopCelebration({ clearBursts: true });
   rollSound.currentTime = 0;
   rollSound.play().catch(() => {
     // Ignore blocked autoplay errors; button click usually allows playback.
@@ -439,7 +589,13 @@ const finishRollIfStable = () => {
 
   isRolling = false;
   const value = getTopFaceValue();
-  resultLabel.textContent = `You rolled ${value}`;
+  if (value === 6) {
+    resultLabel.textContent = "You rolled 6! Celebration!";
+    triggerSixCelebration();
+  } else {
+    resultLabel.textContent = `You rolled ${value}`;
+    resultLabel.classList.remove("celebrate");
+  }
   rollButton.disabled = false;
 };
 
@@ -514,6 +670,8 @@ const animate = () => {
   shimmerMesh.quaternion.copy(diceBody.quaternion);
   shimmerUniforms.uTime.value += realDelta;
   updateDiceFaceColors(realDelta);
+  updateCelebration(realDelta);
+  updateFireworks(realDelta);
 
   desiredTarget.set(diceMesh.position.x, Math.max(-0.2, diceMesh.position.y * 0.2), diceMesh.position.z);
   cameraTarget.lerp(desiredTarget, 0.1);
