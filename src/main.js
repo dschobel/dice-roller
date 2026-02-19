@@ -3,7 +3,6 @@ import * as THREE from "../vendor/three.module.js";
 
 const canvas = document.querySelector("#scene");
 const rollButton = document.querySelector("#roll-btn");
-const colorButton = document.querySelector("#color-btn");
 const resultLabel = document.querySelector("#result");
 const speedSlider = document.querySelector("#speed-slider");
 const speedValue = document.querySelector("#speed-value");
@@ -85,52 +84,106 @@ for (const [x, y, z, geometry] of boundaryWalls) {
   scene.add(wallMesh);
 }
 
-const createPastelPalette = () => {
-  const baseHue = Math.random() * 360;
-  return Array.from({ length: 6 }, (_, index) => {
-    const hue = (baseHue + index * 60 + (Math.random() - 0.5) * 18 + 360) % 360;
-    const saturation = 56 + Math.random() * 14;
-    const lightness = 78 + Math.random() * 10;
-    return `hsl(${hue.toFixed(0)} ${saturation.toFixed(0)}% ${lightness.toFixed(0)}%)`;
-  });
+const randomPastelColor = () => ({
+  h: Math.random() * 360,
+  s: 56 + Math.random() * 14,
+  l: 78 + Math.random() * 10
+});
+
+const hslToCss = (color) => `hsl(${color.h.toFixed(0)} ${color.s.toFixed(0)}% ${color.l.toFixed(0)}%)`;
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const lerpHue = (a, b, t) => {
+  const delta = ((((b - a) % 360) + 540) % 360) - 180;
+  return (a + delta * t + 360) % 360;
 };
 
-const createFaceTexture = (value, backgroundColor) => {
+const easeInOut = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t);
+
+const createFaceTexture = (value, initialColor) => {
   const size = 512;
   const tCanvas = document.createElement("canvas");
   tCanvas.width = size;
   tCanvas.height = size;
   const ctx = tCanvas.getContext("2d");
 
-  ctx.fillStyle = backgroundColor;
-  ctx.fillRect(0, 0, size, size);
-
-  ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
-  ctx.lineWidth = 24;
-  ctx.strokeRect(14, 14, size - 28, size - 28);
-
-  ctx.fillStyle = "#111827";
-  ctx.font = "700 290px 'Avenir Next', 'Segoe UI', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(String(value), size / 2, size / 2 + 6);
-
   const texture = new THREE.CanvasTexture(tCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return texture;
+
+  const drawFace = (color) => {
+    ctx.fillStyle = hslToCss(color);
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
+    ctx.lineWidth = 24;
+    ctx.strokeRect(14, 14, size - 28, size - 28);
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "700 290px 'Avenir Next', 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(value), size / 2, size / 2 + 6);
+    texture.needsUpdate = true;
+  };
+
+  drawFace(initialColor);
+
+  return {
+    drawFace,
+    texture
+  };
 };
 
 const faceValues = [3, 4, 1, 6, 2, 5];
-const faceColors = createPastelPalette();
-const diceMaterials = faceValues.map(
-  (value, index) =>
+const faceTransitions = faceValues.map((value) => {
+  const from = randomPastelColor();
+  return {
+    from,
+    painter: createFaceTexture(value, from),
+    progress: Math.random(),
+    target: randomPastelColor(),
+    transitionDuration: 1.5 + Math.random() * 2.2
+  };
+});
+
+const diceMaterials = faceTransitions.map(
+  (transition) =>
     new THREE.MeshStandardMaterial({
-      map: createFaceTexture(value, faceColors[index]),
+      map: transition.painter.texture,
       roughness: 0.36,
       metalness: 0.08
     })
 );
+
+let faceColorAccumulator = 0;
+const faceColorStep = 1 / 30;
+
+const updateDiceFaceColors = (deltaSeconds) => {
+  faceColorAccumulator += deltaSeconds;
+
+  while (faceColorAccumulator >= faceColorStep) {
+    faceColorAccumulator -= faceColorStep;
+
+    for (const transition of faceTransitions) {
+      transition.progress += faceColorStep / transition.transitionDuration;
+
+      if (transition.progress >= 1) {
+        transition.from = transition.target;
+        transition.target = randomPastelColor();
+        transition.progress = 0;
+        transition.transitionDuration = 1.5 + Math.random() * 2.2;
+      }
+
+      const eased = easeInOut(transition.progress);
+      transition.painter.drawFace({
+        h: lerpHue(transition.from.h, transition.target.h, eased),
+        s: lerp(transition.from.s, transition.target.s, eased),
+        l: lerp(transition.from.l, transition.target.l, eased)
+      });
+    }
+  }
+};
 
 const diceMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), diceMaterials);
 diceMesh.castShadow = true;
@@ -309,19 +362,6 @@ const getTopFaceValue = () => {
   return top;
 };
 
-const randomizeDiceFaceColors = () => {
-  const nextColors = createPastelPalette();
-  for (let i = 0; i < diceMaterials.length; i += 1) {
-    const nextTexture = createFaceTexture(faceValues[i], nextColors[i]);
-    const previousTexture = diceMaterials[i].map;
-    diceMaterials[i].map = nextTexture;
-    diceMaterials[i].needsUpdate = true;
-    if (previousTexture) {
-      previousTexture.dispose();
-    }
-  }
-};
-
 const resetDice = () => {
   const x = (Math.random() - 0.5) * 1.2;
   const z = (Math.random() - 0.5) * 1.2;
@@ -412,14 +452,16 @@ const desiredCameraPosition = new THREE.Vector3(0, 0, 0);
 const animate = () => {
   requestAnimationFrame(animate);
 
-  const dt = Math.min(clock.getDelta() * simulationSpeed, 0.12);
-  world.step(1 / 60, dt, 5);
+  const realDelta = Math.min(clock.getDelta(), 0.05);
+  const physicsDelta = Math.min(realDelta * simulationSpeed, 0.12);
+  world.step(1 / 60, physicsDelta, 5);
 
   diceMesh.position.copy(diceBody.position);
   diceMesh.quaternion.copy(diceBody.quaternion);
   shimmerMesh.position.copy(diceBody.position);
   shimmerMesh.quaternion.copy(diceBody.quaternion);
-  shimmerUniforms.uTime.value += dt;
+  shimmerUniforms.uTime.value += realDelta;
+  updateDiceFaceColors(realDelta);
 
   desiredTarget.set(diceMesh.position.x, Math.max(-0.2, diceMesh.position.y * 0.2), diceMesh.position.z);
   cameraTarget.lerp(desiredTarget, 0.1);
@@ -439,7 +481,6 @@ const onResize = () => {
 
 window.addEventListener("resize", onResize);
 rollButton.addEventListener("click", rollDice);
-colorButton.addEventListener("click", randomizeDiceFaceColors);
 speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.target.value));
 updateSimulationSpeed(speedSlider.value);
 
