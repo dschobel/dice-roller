@@ -1,5 +1,7 @@
 import * as CANNON from "../vendor/cannon-es.js";
 import * as THREE from "../vendor/three.module.js";
+import { GLTFLoader } from "../vendor/examples/jsm/loaders/GLTFLoader.js";
+import { clone as cloneSkinned } from "../vendor/examples/jsm/utils/SkeletonUtils.js";
 
 const canvas = document.querySelector("#scene");
 const resultLabel = document.querySelector("#result");
@@ -11,6 +13,30 @@ rollSound.preload = "auto";
 rollSound.volume = 0.75;
 tromboneSound.preload = "auto";
 tromboneSound.volume = 0.82;
+
+const critterConfig = {
+  modelUrl: new URL("../blackrat/blackrat.glb", import.meta.url).href,
+  count: 3,
+  walkClipIndex: 0,
+  interactionMode: "visual",
+  wanderRadius: 18,
+  turnRateMin: 1.8,
+  turnRateMax: 3.5,
+  moveSpeedMin: 0.85,
+  moveSpeedMax: 1.6,
+  pauseMin: 0.12,
+  pauseMax: 0.9,
+  reachDistance: 0.7,
+  targetLongestSide: 14.5
+};
+
+const critterRuntime = {
+  isReady: false,
+  baseY: -1.48,
+  entities: [],
+  walkClip: null,
+  scratchMove: new THREE.Vector3()
+};
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b1220);
@@ -164,6 +190,179 @@ floor.rotation.x = -Math.PI / 2;
 floor.position.y = -1.5;
 floor.receiveShadow = true;
 scene.add(floor);
+
+const critterGroup = new THREE.Group();
+critterGroup.name = "critters";
+scene.add(critterGroup);
+
+const critterLoader = new GLTFLoader();
+
+const randomInRange = (min, max) => min + Math.random() * (max - min);
+
+const normalizeAngle = (angle) => {
+  let wrapped = angle;
+  while (wrapped > Math.PI) {
+    wrapped -= Math.PI * 2;
+  }
+  while (wrapped < -Math.PI) {
+    wrapped += Math.PI * 2;
+  }
+  return wrapped;
+};
+
+const getRandomWanderTarget = (target, minRadius = 0) => {
+  const boundedMinRadius = THREE.MathUtils.clamp(minRadius, 0, critterConfig.wanderRadius);
+  const radius = Math.sqrt(Math.random()) * (critterConfig.wanderRadius - boundedMinRadius) + boundedMinRadius;
+  const angle = Math.random() * Math.PI * 2;
+  target.set(Math.cos(angle) * radius, critterRuntime.baseY, Math.sin(angle) * radius);
+  return target;
+};
+
+const clearCritters = () => {
+  for (const entity of critterRuntime.entities) {
+    critterGroup.remove(entity.root);
+    if (entity.mixer) {
+      entity.mixer.stopAllAction();
+    }
+  }
+  critterRuntime.entities.length = 0;
+};
+
+const prepareCritterTemplate = (rawTemplate) => {
+  rawTemplate.traverse((node) => {
+    if (!node.isMesh) {
+      return;
+    }
+
+    node.castShadow = true;
+    node.receiveShadow = false;
+  });
+
+  rawTemplate.updateMatrixWorld(true);
+  const startingBounds = new THREE.Box3().setFromObject(rawTemplate);
+  const startingSize = startingBounds.getSize(new THREE.Vector3());
+  const longestSide = Math.max(startingSize.x, startingSize.y, startingSize.z) || 1;
+  const scale = critterConfig.targetLongestSide / longestSide;
+  rawTemplate.scale.setScalar(scale);
+
+  rawTemplate.updateMatrixWorld(true);
+  const centeredBounds = new THREE.Box3().setFromObject(rawTemplate);
+  const center = centeredBounds.getCenter(new THREE.Vector3());
+  rawTemplate.position.x -= center.x;
+  rawTemplate.position.z -= center.z;
+
+  rawTemplate.updateMatrixWorld(true);
+  const alignedBounds = new THREE.Box3().setFromObject(rawTemplate);
+  rawTemplate.position.y += floor.position.y - alignedBounds.min.y + 0.01;
+  rawTemplate.updateMatrixWorld(true);
+
+  critterRuntime.baseY = rawTemplate.position.y;
+  return rawTemplate;
+};
+
+const setNextCritterTarget = (entity, { minRadius = 0 } = {}) => {
+  getRandomWanderTarget(entity.target, minRadius);
+  entity.speed = randomInRange(critterConfig.moveSpeedMin, critterConfig.moveSpeedMax);
+  entity.turnRate = randomInRange(critterConfig.turnRateMin, critterConfig.turnRateMax);
+};
+
+const spawnCritters = (template, walkClip) => {
+  clearCritters();
+
+  for (let i = 0; i < critterConfig.count; i += 1) {
+    const root = cloneSkinned(template);
+    root.position.set(0, critterRuntime.baseY, 0);
+    root.rotation.y = Math.random() * Math.PI * 2;
+    getRandomWanderTarget(root.position, 3.5);
+    root.position.y = critterRuntime.baseY;
+
+    const mixer = new THREE.AnimationMixer(root);
+    if (walkClip) {
+      const action = mixer.clipAction(walkClip);
+      action.play();
+      action.timeScale = randomInRange(0.9, 1.2);
+    }
+
+    const entity = {
+      root,
+      mixer,
+      target: new THREE.Vector3(),
+      speed: 0,
+      turnRate: 0,
+      pauseTime: randomInRange(0, 0.6)
+    };
+    setNextCritterTarget(entity, { minRadius: 2.2 });
+
+    critterRuntime.entities.push(entity);
+    critterGroup.add(root);
+  }
+};
+
+const loadCritters = async () => {
+  try {
+    const gltf = await critterLoader.loadAsync(critterConfig.modelUrl);
+    const template = prepareCritterTemplate(gltf.scene);
+    critterRuntime.walkClip = gltf.animations[critterConfig.walkClipIndex] || gltf.animations[0] || null;
+    spawnCritters(template, critterRuntime.walkClip);
+    critterRuntime.isReady = true;
+  } catch (error) {
+    console.warn("Failed to load critter model:", error);
+  }
+};
+
+const updateCrittersVisual = (deltaSeconds) => {
+  const maxRadiusSq = (critterConfig.wanderRadius + 3) * (critterConfig.wanderRadius + 3);
+  for (const entity of critterRuntime.entities) {
+    entity.mixer.update(deltaSeconds);
+
+    if (entity.pauseTime > 0) {
+      entity.pauseTime -= deltaSeconds;
+      continue;
+    }
+
+    if (entity.root.position.x * entity.root.position.x + entity.root.position.z * entity.root.position.z > maxRadiusSq) {
+      entity.target.set(0, critterRuntime.baseY, 0);
+    }
+
+    const toTarget = critterRuntime.scratchMove;
+    toTarget.set(entity.target.x - entity.root.position.x, 0, entity.target.z - entity.root.position.z);
+    const distance = toTarget.length();
+
+    if (distance < critterConfig.reachDistance) {
+      entity.pauseTime = randomInRange(critterConfig.pauseMin, critterConfig.pauseMax);
+      setNextCritterTarget(entity, { minRadius: 1.5 });
+      continue;
+    }
+
+    const desiredYaw = Math.atan2(toTarget.x, toTarget.z);
+    const yawDelta = normalizeAngle(desiredYaw - entity.root.rotation.y);
+    const maxTurn = entity.turnRate * deltaSeconds;
+    entity.root.rotation.y += THREE.MathUtils.clamp(yawDelta, -maxTurn, maxTurn);
+
+    const turnSlowdown = 1 - Math.min(Math.abs(yawDelta) / Math.PI, 0.68);
+    const step = Math.min(distance, Math.max(0.01, entity.speed * turnSlowdown * deltaSeconds));
+    entity.root.position.x += Math.sin(entity.root.rotation.y) * step;
+    entity.root.position.z += Math.cos(entity.root.rotation.y) * step;
+    entity.root.position.y = critterRuntime.baseY;
+  }
+};
+
+const updateCrittersPhysics = (_deltaSeconds) => {
+  // Reserved for future CANNON-driven critter bodies.
+};
+
+const updateCritters = (deltaSeconds) => {
+  if (!critterRuntime.isReady) {
+    return;
+  }
+
+  if (critterConfig.interactionMode === "physics") {
+    updateCrittersPhysics(deltaSeconds);
+    return;
+  }
+
+  updateCrittersVisual(deltaSeconds);
+};
 
 const createGoldDiamondFaceTexture = (value) => {
   const size = 512;
@@ -708,6 +907,7 @@ const animate = () => {
   shimmerUniforms.uTime.value += realDelta;
   updateCelebration(realDelta);
   updateFireworks(realDelta);
+  updateCritters(realDelta);
 
   desiredTarget.set(diceMesh.position.x, Math.max(-0.2, diceMesh.position.y * 0.2), diceMesh.position.z);
   cameraTarget.lerp(desiredTarget, 0.1);
@@ -734,6 +934,7 @@ speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.tar
 updateSimulationSpeed(speedSlider.value);
 
 resetDice();
+loadCritters();
 animate();
 
 if ("serviceWorker" in navigator) {
