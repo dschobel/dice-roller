@@ -2,13 +2,15 @@ import * as CANNON from "../vendor/cannon-es.js";
 import * as THREE from "../vendor/three.module.js";
 
 const canvas = document.querySelector("#scene");
-const rollButton = document.querySelector("#roll-btn");
 const resultLabel = document.querySelector("#result");
 const speedSlider = document.querySelector("#speed-slider");
 const speedValue = document.querySelector("#speed-value");
 const rollSound = new Audio(new URL("../roll.wav", import.meta.url).href);
+const tromboneSound = new Audio(new URL("../trombone.wav", import.meta.url).href);
 rollSound.preload = "auto";
 rollSound.volume = 0.75;
+tromboneSound.preload = "auto";
+tromboneSound.volume = 0.82;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b1220);
@@ -26,164 +28,236 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.28;
 
-const hemisphereLight = new THREE.HemisphereLight(0xcbd5e1, 0x020617, 1.2);
+const createStudioEnvironment = () => {
+  const width = 1024;
+  const height = 512;
+  const envCanvas = document.createElement("canvas");
+  envCanvas.width = width;
+  envCanvas.height = height;
+  const ctx = envCanvas.getContext("2d");
+
+  const base = ctx.createLinearGradient(0, 0, 0, height);
+  base.addColorStop(0, "#ffe9b8");
+  base.addColorStop(0.28, "#c9d7ff");
+  base.addColorStop(0.58, "#33486f");
+  base.addColorStop(1, "#050914");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, width, height);
+
+  const topWarm = ctx.createRadialGradient(width * 0.34, height * 0.2, 1, width * 0.34, height * 0.2, width * 0.45);
+  topWarm.addColorStop(0, "rgba(255, 232, 170, 0.95)");
+  topWarm.addColorStop(0.4, "rgba(255, 211, 120, 0.35)");
+  topWarm.addColorStop(1, "rgba(255, 190, 110, 0)");
+  ctx.fillStyle = topWarm;
+  ctx.fillRect(0, 0, width, height);
+
+  const coolRim = ctx.createRadialGradient(width * 0.76, height * 0.3, 1, width * 0.76, height * 0.3, width * 0.38);
+  coolRim.addColorStop(0, "rgba(174, 214, 255, 0.65)");
+  coolRim.addColorStop(1, "rgba(100, 150, 255, 0)");
+  ctx.fillStyle = coolRim;
+  ctx.fillRect(0, 0, width, height);
+
+  const horizon = ctx.createLinearGradient(0, height * 0.55, 0, height * 0.74);
+  horizon.addColorStop(0, "rgba(255, 226, 170, 0)");
+  horizon.addColorStop(1, "rgba(255, 215, 140, 0.33)");
+  ctx.fillStyle = horizon;
+  ctx.fillRect(0, 0, width, height);
+
+  const envTexture = new THREE.CanvasTexture(envCanvas);
+  envTexture.colorSpace = THREE.SRGBColorSpace;
+  envTexture.mapping = THREE.EquirectangularReflectionMapping;
+  return envTexture;
+};
+
+const studioEnvMap = createStudioEnvironment();
+scene.environment = studioEnvMap;
+scene.background = new THREE.Color(0x0b1220);
+
+const hemisphereLight = new THREE.HemisphereLight(0xe8efff, 0x0b1323, 0.55);
 scene.add(hemisphereLight);
 
-const dirLight = new THREE.DirectionalLight(0xfff7ed, 1.55);
-dirLight.position.set(5.5, 8, 4);
+const dirLight = new THREE.DirectionalLight(0xffefc6, 2.8);
+dirLight.position.set(5.6, 8.4, 3.8);
 dirLight.castShadow = true;
-dirLight.shadow.mapSize.set(1024, 1024);
+dirLight.shadow.mapSize.set(2048, 2048);
 dirLight.shadow.camera.near = 0.5;
-dirLight.shadow.camera.far = 20;
-dirLight.shadow.camera.left = -6;
-dirLight.shadow.camera.right = 6;
-dirLight.shadow.camera.top = 6;
-dirLight.shadow.camera.bottom = -6;
+dirLight.shadow.camera.far = 26;
+dirLight.shadow.camera.left = -9;
+dirLight.shadow.camera.right = 9;
+dirLight.shadow.camera.top = 9;
+dirLight.shadow.camera.bottom = -9;
 scene.add(dirLight);
 
+const rimLight = new THREE.DirectionalLight(0x8fc3ff, 1.35);
+rimLight.position.set(-6.4, 5.2, -4.6);
+scene.add(rimLight);
+
+const fillLight = new THREE.PointLight(0xffc388, 1.15, 22, 2);
+fillLight.position.set(-1.3, 2.4, 4.8);
+scene.add(fillLight);
+
+const createGlitterFloorMaterial = () => {
+  const size = 1024;
+  const floorCanvas = document.createElement("canvas");
+  floorCanvas.width = size;
+  floorCanvas.height = size;
+  const ctx = floorCanvas.getContext("2d");
+
+  const base = ctx.createLinearGradient(0, 0, size, size);
+  base.addColorStop(0, "#45107a");
+  base.addColorStop(0.4, "#6627a1");
+  base.addColorStop(1, "#2a0c4f");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 2900; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = 0.35 + Math.random() * 1.45;
+    const hue = 260 + Math.random() * 55;
+    const alpha = 0.16 + Math.random() * 0.42;
+    ctx.beginPath();
+    ctx.fillStyle = `hsla(${hue.toFixed(0)}, 95%, 74%, ${alpha.toFixed(2)})`;
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (let i = 0; i < 180; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const arm = 2.2 + Math.random() * 3.6;
+    ctx.strokeStyle = `rgba(255, 245, 255, ${(0.22 + Math.random() * 0.44).toFixed(2)})`;
+    ctx.lineWidth = 0.8 + Math.random() * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(x - arm, y);
+    ctx.lineTo(x + arm, y);
+    ctx.moveTo(x, y - arm);
+    ctx.lineTo(x, y + arm);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(floorCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(18, 18);
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  return new THREE.MeshStandardMaterial({
+    map: texture,
+    roughness: 0.38,
+    metalness: 0.48,
+    emissive: 0x21053f,
+    emissiveIntensity: 0.32
+  });
+};
+
+const floorSize = 120;
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(12, 12),
-  new THREE.MeshStandardMaterial({
-    color: 0x141d33,
-    roughness: 0.88,
-    metalness: 0.03
-  })
+  new THREE.PlaneGeometry(floorSize, floorSize),
+  createGlitterFloorMaterial()
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = -1.5;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const arenaHalfSize = 6.2;
-const wallThickness = 0.3;
-const wallHeight = 3.5;
-const wallCenterY = floor.position.y + wallHeight / 2;
-
-const boundaryMaterial = new THREE.MeshStandardMaterial({
-  color: 0x334155,
-  roughness: 0.7,
-  metalness: 0.08,
-  transparent: true,
-  opacity: 0.24
-});
-
-const wallGeometryX = new THREE.BoxGeometry(wallThickness, wallHeight, arenaHalfSize * 2 + wallThickness * 2);
-const wallGeometryZ = new THREE.BoxGeometry(arenaHalfSize * 2 + wallThickness * 2, wallHeight, wallThickness);
-const boundaryWalls = [
-  [arenaHalfSize + wallThickness / 2, wallCenterY, 0, wallGeometryX],
-  [-arenaHalfSize - wallThickness / 2, wallCenterY, 0, wallGeometryX],
-  [0, wallCenterY, arenaHalfSize + wallThickness / 2, wallGeometryZ],
-  [0, wallCenterY, -arenaHalfSize - wallThickness / 2, wallGeometryZ]
-];
-
-for (const [x, y, z, geometry] of boundaryWalls) {
-  const wallMesh = new THREE.Mesh(geometry, boundaryMaterial);
-  wallMesh.position.set(x, y, z);
-  wallMesh.receiveShadow = true;
-  scene.add(wallMesh);
-}
-
-const randomPastelColor = () => ({
-  h: Math.random() * 360,
-  s: 56 + Math.random() * 14,
-  l: 78 + Math.random() * 10
-});
-
-const hslToCss = (color) => `hsl(${color.h.toFixed(0)} ${color.s.toFixed(0)}% ${color.l.toFixed(0)}%)`;
-
-const lerp = (a, b, t) => a + (b - a) * t;
-const lerpHue = (a, b, t) => {
-  const delta = ((((b - a) % 360) + 540) % 360) - 180;
-  return (a + delta * t + 360) % 360;
-};
-
-const easeInOut = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t);
-
-const createFaceTexture = (value, initialColor) => {
+const createGoldDiamondFaceTexture = (value) => {
   const size = 512;
   const tCanvas = document.createElement("canvas");
   tCanvas.width = size;
   tCanvas.height = size;
   const ctx = tCanvas.getContext("2d");
 
+  const baseGradient = ctx.createLinearGradient(0, 0, size, size);
+  baseGradient.addColorStop(0, "#5f3e00");
+  baseGradient.addColorStop(0.23, "#a06b00");
+  baseGradient.addColorStop(0.45, "#ffd56f");
+  baseGradient.addColorStop(0.72, "#b57e05");
+  baseGradient.addColorStop(1, "#4e3300");
+  ctx.fillStyle = baseGradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const sheen = ctx.createRadialGradient(size * 0.32, size * 0.28, size * 0.08, size * 0.34, size * 0.3, size * 0.78);
+  sheen.addColorStop(0, "rgba(255, 246, 196, 0.82)");
+  sheen.addColorStop(0.3, "rgba(255, 224, 140, 0.35)");
+  sheen.addColorStop(1, "rgba(255, 215, 128, 0)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, size, size);
+
+  const tile = size / 6.5;
+  ctx.lineWidth = 2.2;
+  for (let rowY = -tile; rowY < size + tile; rowY += tile * 0.82) {
+    const rowOffset = ((Math.round(rowY / (tile * 0.82)) & 1) * tile) / 2;
+    for (let x = -tile; x < size + tile; x += tile) {
+      const cx = x + rowOffset;
+      const cy = rowY;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - tile * 0.3);
+      ctx.lineTo(cx + tile * 0.34, cy);
+      ctx.lineTo(cx, cy + tile * 0.3);
+      ctx.lineTo(cx - tile * 0.34, cy);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255, 245, 190, 0.16)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 248, 210, 0.24)";
+      ctx.stroke();
+    }
+  }
+
+  for (let i = 0; i < 22; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = 1 + Math.random() * 2.4;
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.42)";
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+    ctx.lineWidth = 1;
+    ctx.moveTo(x - radius * 2.2, y);
+    ctx.lineTo(x + radius * 2.2, y);
+    ctx.moveTo(x, y - radius * 2.2);
+    ctx.lineTo(x, y + radius * 2.2);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(255, 246, 200, 0.38)";
+  ctx.lineWidth = 20;
+  ctx.strokeRect(16, 16, size - 32, size - 32);
+
+  ctx.fillStyle = "rgba(51, 30, 0, 0.9)";
+  ctx.strokeStyle = "rgba(255, 239, 184, 0.72)";
+  ctx.lineWidth = 8;
+  ctx.font = "700 290px 'Avenir Next', 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeText(String(value), size / 2, size / 2 + 7);
+  ctx.fillText(String(value), size / 2, size / 2 + 7);
+
   const texture = new THREE.CanvasTexture(tCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-
-  const drawFace = (color) => {
-    ctx.fillStyle = hslToCss(color);
-    ctx.fillRect(0, 0, size, size);
-
-    ctx.strokeStyle = "rgba(15, 23, 42, 0.18)";
-    ctx.lineWidth = 24;
-    ctx.strokeRect(14, 14, size - 28, size - 28);
-
-    ctx.fillStyle = "#111827";
-    ctx.font = "700 290px 'Avenir Next', 'Segoe UI', sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(value), size / 2, size / 2 + 6);
-    texture.needsUpdate = true;
-  };
-
-  drawFace(initialColor);
-
-  return {
-    drawFace,
-    texture
-  };
+  return texture;
 };
 
 const faceValues = [3, 4, 1, 6, 2, 5];
-const faceTransitions = faceValues.map((value) => {
-  const from = randomPastelColor();
-  return {
-    from,
-    painter: createFaceTexture(value, from),
-    progress: Math.random(),
-    target: randomPastelColor(),
-    transitionDuration: 1.5 + Math.random() * 2.2
-  };
-});
-
-const diceMaterials = faceTransitions.map(
-  (transition) =>
-    new THREE.MeshStandardMaterial({
-      map: transition.painter.texture,
-      roughness: 0.36,
-      metalness: 0.08
+const diceMaterials = faceValues.map(
+  (value) =>
+    new THREE.MeshPhysicalMaterial({
+      map: createGoldDiamondFaceTexture(value),
+      metalness: 1,
+      roughness: 0.17,
+      clearcoat: 1,
+      clearcoatRoughness: 0.08,
+      color: 0xffcf5a,
+      envMapIntensity: 1.95
     })
 );
-
-let faceColorAccumulator = 0;
-const faceColorStep = 1 / 30;
-
-const updateDiceFaceColors = (deltaSeconds) => {
-  faceColorAccumulator += deltaSeconds;
-
-  while (faceColorAccumulator >= faceColorStep) {
-    faceColorAccumulator -= faceColorStep;
-
-    for (const transition of faceTransitions) {
-      transition.progress += faceColorStep / transition.transitionDuration;
-
-      if (transition.progress >= 1) {
-        transition.from = transition.target;
-        transition.target = randomPastelColor();
-        transition.progress = 0;
-        transition.transitionDuration = 1.5 + Math.random() * 2.2;
-      }
-
-      const eased = easeInOut(transition.progress);
-      transition.painter.drawFace({
-        h: lerpHue(transition.from.h, transition.target.h, eased),
-        s: lerp(transition.from.s, transition.target.s, eased),
-        l: lerp(transition.from.l, transition.target.l, eased)
-      });
-    }
-  }
-};
 
 const diceMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), diceMaterials);
 diceMesh.castShadow = true;
@@ -267,7 +341,7 @@ const celebration = {
   nextBurstAt: 0,
   duration: 3.8
 };
-const baseDirLightIntensity = 1.55;
+const baseDirLightIntensity = dirLight.intensity;
 
 const createFireworkBurst = (origin, particleCount = 160) => {
   const positions = new Float32Array(particleCount * 3);
@@ -433,49 +507,6 @@ world.addContactMaterial(
   })
 );
 
-const addWallBody = (x, y, z, halfX, halfY, halfZ) => {
-  const wallBody = new CANNON.Body({
-    mass: 0,
-    shape: new CANNON.Box(new CANNON.Vec3(halfX, halfY, halfZ)),
-    material: floorMaterial
-  });
-  wallBody.position.set(x, y, z);
-  world.addBody(wallBody);
-};
-
-addWallBody(
-  arenaHalfSize + wallThickness / 2,
-  wallCenterY,
-  0,
-  wallThickness / 2,
-  wallHeight / 2,
-  arenaHalfSize + wallThickness
-);
-addWallBody(
-  -arenaHalfSize - wallThickness / 2,
-  wallCenterY,
-  0,
-  wallThickness / 2,
-  wallHeight / 2,
-  arenaHalfSize + wallThickness
-);
-addWallBody(
-  0,
-  wallCenterY,
-  arenaHalfSize + wallThickness / 2,
-  arenaHalfSize + wallThickness,
-  wallHeight / 2,
-  wallThickness / 2
-);
-addWallBody(
-  0,
-  wallCenterY,
-  -arenaHalfSize - wallThickness / 2,
-  arenaHalfSize + wallThickness,
-  wallHeight / 2,
-  wallThickness / 2
-);
-
 const diceBody = new CANNON.Body({
   mass: 1,
   shape: new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)),
@@ -539,6 +570,8 @@ const rollDice = () => {
   }
 
   stopCelebration({ clearBursts: true });
+  tromboneSound.pause();
+  tromboneSound.currentTime = 0;
   rollSound.currentTime = 0;
   rollSound.play().catch(() => {
     // Ignore blocked autoplay errors; button click usually allows playback.
@@ -547,7 +580,6 @@ const rollDice = () => {
   isRolling = true;
   stableFrames = 0;
   resultLabel.textContent = "Rolling...";
-  rollButton.disabled = true;
 
   resetDice();
 
@@ -595,8 +627,13 @@ const finishRollIfStable = () => {
   } else {
     resultLabel.textContent = `You rolled ${value}`;
     resultLabel.classList.remove("celebrate");
+    if (value === 1) {
+      tromboneSound.currentTime = 0;
+      tromboneSound.play().catch(() => {
+        // Ignore blocked playback errors.
+      });
+    }
   }
-  rollButton.disabled = false;
 };
 
 const clock = new THREE.Clock();
@@ -669,7 +706,6 @@ const animate = () => {
   shimmerMesh.position.copy(diceBody.position);
   shimmerMesh.quaternion.copy(diceBody.quaternion);
   shimmerUniforms.uTime.value += realDelta;
-  updateDiceFaceColors(realDelta);
   updateCelebration(realDelta);
   updateFireworks(realDelta);
 
@@ -690,7 +726,6 @@ const onResize = () => {
 };
 
 window.addEventListener("resize", onResize);
-rollButton.addEventListener("click", rollDice);
 canvas.addEventListener("pointerdown", onCanvasPointerDown);
 canvas.addEventListener("pointerup", onCanvasPointerUp);
 canvas.addEventListener("pointercancel", clearTapState);
