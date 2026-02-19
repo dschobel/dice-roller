@@ -137,6 +137,73 @@ diceMesh.castShadow = true;
 diceMesh.receiveShadow = true;
 scene.add(diceMesh);
 
+const shimmerUniforms = {
+  uTime: { value: 0 }
+};
+
+const shimmerMaterial = new THREE.ShaderMaterial({
+  uniforms: shimmerUniforms,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    varying vec3 vWorldNormal;
+
+    void main() {
+      vUv = uv;
+      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      vWorldPos = worldPos.xyz;
+      vWorldNormal = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * viewMatrix * worldPos;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    varying vec3 vWorldNormal;
+
+    float hash(vec3 p) {
+      p = fract(p * 0.1031);
+      p += dot(p, p.yzx + 33.33);
+      return fract((p.x + p.y) * p.z);
+    }
+
+    vec3 hsv2rgb(vec3 c) {
+      vec3 rgb = clamp(abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+      rgb = rgb * rgb * (3.0 - 2.0 * rgb);
+      return c.z * mix(vec3(1.0), rgb, c.y);
+    }
+
+    void main() {
+      vec3 normal = normalize(vWorldNormal);
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.2);
+
+      float ripple = sin((vUv.x - vUv.y) * 20.0 + uTime * 5.5) * 0.5 + 0.5;
+      float hue = fract(vUv.x * 0.85 + vUv.y * 0.55 + uTime * 0.08 + ripple * 0.25);
+      vec3 rainbow = hsv2rgb(vec3(hue, 0.88, 1.0));
+
+      float sparkleSeed = hash(vec3(floor(vUv * 85.0), floor(uTime * 16.0)));
+      float sparkle = smoothstep(0.985, 1.0, sparkleSeed);
+      sparkle *= 0.6 + 0.4 * sin(uTime * 34.0 + vUv.x * 130.0 + vUv.y * 90.0);
+
+      float shimmer = 0.5 + 0.5 * sin(uTime * 3.1 + (vUv.x + vUv.y) * 12.0);
+      vec3 color = rainbow * (0.25 + fresnel * 0.9) * (0.65 + shimmer * 0.35);
+      color += vec3(1.0, 0.98, 0.9) * sparkle * (0.45 + fresnel);
+
+      float alpha = clamp(fresnel * 0.78 + sparkle * 0.7, 0.0, 0.92);
+      gl_FragColor = vec4(color, alpha * 0.72);
+    }
+  `
+});
+
+const shimmerMesh = new THREE.Mesh(new THREE.BoxGeometry(1.04, 1.04, 1.04), shimmerMaterial);
+shimmerMesh.renderOrder = 2;
+scene.add(shimmerMesh);
+
 const world = new CANNON.World({
   gravity: new CANNON.Vec3(0, -9.82, 0)
 });
@@ -350,6 +417,9 @@ const animate = () => {
 
   diceMesh.position.copy(diceBody.position);
   diceMesh.quaternion.copy(diceBody.quaternion);
+  shimmerMesh.position.copy(diceBody.position);
+  shimmerMesh.quaternion.copy(diceBody.quaternion);
+  shimmerUniforms.uTime.value += dt;
 
   desiredTarget.set(diceMesh.position.x, Math.max(-0.2, diceMesh.position.y * 0.2), diceMesh.position.z);
   cameraTarget.lerp(desiredTarget, 0.1);
