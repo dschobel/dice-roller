@@ -1084,29 +1084,12 @@ const cameraOffset = new THREE.Vector3(9.5, 8.0, 11.0);
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 const desiredTarget = new THREE.Vector3(0, 0, 0);
 const desiredCameraPosition = new THREE.Vector3(0, 0, 0);
-const tapRaycaster = new THREE.Raycaster();
-const tapPointer = new THREE.Vector2();
 const tapState = {
   pointerId: null,
   startX: 0,
   startY: 0
 };
 const tapMoveThresholdPx = 14;
-
-const updateTapRay = (clientX, clientY) => {
-  const rect = canvas.getBoundingClientRect();
-  tapPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-  tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-  tapRaycaster.setFromCamera(tapPointer, camera);
-};
-
-const tryRollFromTap = (clientX, clientY) => {
-  updateTapRay(clientX, clientY);
-  const hits = tapRaycaster.intersectObjects([shimmerMesh, diceMesh], false);
-  if (hits.length > 0) {
-    rollDice();
-  }
-};
 
 const onCanvasPointerDown = (event) => {
   if (event.pointerType === "mouse" && event.button !== 0) {
@@ -1130,7 +1113,7 @@ const onCanvasPointerUp = (event) => {
     return;
   }
 
-  tryRollFromTap(event.clientX, event.clientY);
+  rollDice();
 };
 
 const clearTapState = () => {
@@ -1171,10 +1154,10 @@ const onResize = () => {
 };
 
 window.addEventListener("resize", onResize);
-canvas.addEventListener("pointerdown", onCanvasPointerDown);
-canvas.addEventListener("pointerup", onCanvasPointerUp);
-canvas.addEventListener("pointercancel", clearTapState);
-canvas.addEventListener("pointerleave", clearTapState);
+window.addEventListener("pointerdown", onCanvasPointerDown);
+window.addEventListener("pointerup", onCanvasPointerUp);
+window.addEventListener("pointercancel", clearTapState);
+window.addEventListener("blur", clearTapState);
 speedSlider.addEventListener("input", (event) => updateSimulationSpeed(event.target.value));
 updateSimulationSpeed(speedSlider.value);
 
