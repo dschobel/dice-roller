@@ -15,8 +15,8 @@ tromboneSound.preload = "auto";
 tromboneSound.volume = 0.82;
 
 const critterConfig = {
-  modelUrl: new URL("../blackrat/blackrat.glb", import.meta.url).href,
-  count: 5,
+  modelUrl: new URL("../toon_cat_free.glb", import.meta.url).href,
+  count: 3,
   walkClipIndex: 0,
   interactionMode: "visual",
   wanderRadius: 18,
@@ -27,7 +27,7 @@ const critterConfig = {
   pauseMin: 0.12,
   pauseMax: 0.9,
   reachDistance: 0.7,
-  targetLongestSide: 11.6,
+  targetLongestSide: 4.64,
   diceAvoidPadding: 0.62,
   diceSteerWeight: 1.9,
   diceResolveFactor: 0.74,
@@ -63,8 +63,8 @@ const critterRuntime = {
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b1220);
 
-const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(4.7, 4.5, 5.4);
+const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(9.5, 8.0, 11.0);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({
@@ -1080,7 +1080,7 @@ const finishRollIfStable = () => {
 };
 
 const clock = new THREE.Clock();
-const cameraOffset = new THREE.Vector3(4.7, 4.5, 5.4);
+const cameraOffset = new THREE.Vector3(9.5, 8.0, 11.0);
 const cameraTarget = new THREE.Vector3(0, 0, 0);
 const desiredTarget = new THREE.Vector3(0, 0, 0);
 const desiredCameraPosition = new THREE.Vector3(0, 0, 0);
