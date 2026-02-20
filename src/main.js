@@ -221,6 +221,84 @@ const critterLoader = new GLTFLoader();
 
 const randomInRange = (min, max) => min + Math.random() * (max - min);
 
+const catRainbowUniforms = {
+  uTime: { value: 0 }
+};
+
+const applyCatRainbowEffect = (sourceMaterial) => {
+  if (!sourceMaterial || !sourceMaterial.isMaterial) {
+    return sourceMaterial;
+  }
+  if (sourceMaterial.userData?.catRainbowMaterial) {
+    return sourceMaterial;
+  }
+
+  const material = sourceMaterial.clone();
+  material.userData.catRainbowMaterial = true;
+
+  if (material.color && material.color.isColor) {
+    material.color.set(0xffffff);
+  }
+  if ("emissive" in material && material.emissive && material.emissive.isColor) {
+    material.emissive.set(0x000000);
+    material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 0.32);
+  }
+  material.needsUpdate = true;
+  material.customProgramCacheKey = () => "cat-rainbow-v1";
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uCatRainbowTime = catRainbowUniforms.uTime;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+varying vec3 vCatRainbowWorldPos;`
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+vCatRainbowWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+varying vec3 vCatRainbowWorldPos;
+uniform float uCatRainbowTime;
+
+float catRainbowHash(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+vec3 catHsv2rgb(vec3 c) {
+  vec3 rgb = clamp(abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  rgb = rgb * rgb * (3.0 - 2.0 * rgb);
+  return c.z * mix(vec3(1.0), rgb, c.y);
+}`
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `#include <opaque_fragment>
+float swirl = sin(vCatRainbowWorldPos.x * 2.8 + uCatRainbowTime * 4.0)
+  + sin(vCatRainbowWorldPos.z * 2.1 - uCatRainbowTime * 4.8)
+  + sin((vCatRainbowWorldPos.x + vCatRainbowWorldPos.y) * 1.7 + uCatRainbowTime * 5.6);
+float hue = fract(vCatRainbowWorldPos.y * 0.08 + swirl * 0.13 + uCatRainbowTime * 0.16);
+vec3 rainbow = catHsv2rgb(vec3(hue, 0.97, 1.0));
+float pulse = 0.68 + 0.32 * sin(uCatRainbowTime * 8.6 + vCatRainbowWorldPos.x * 3.2 + vCatRainbowWorldPos.z * 2.9);
+float sparkSeed = catRainbowHash(floor(vCatRainbowWorldPos * 7.0) + vec3(0.0, floor(uCatRainbowTime * 18.0), 0.0));
+float sparkle = smoothstep(0.965, 1.0, sparkSeed);
+vec3 sparkleTint = mix(rainbow, vec3(1.0, 0.98, 0.8), 0.6 + 0.4 * pulse);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, rainbow, 0.86);
+gl_FragColor.rgb += rainbow * (0.42 * pulse);
+gl_FragColor.rgb += sparkleTint * sparkle * 0.95;`
+      );
+  };
+
+  return material;
+};
+
 const normalizeAngle = (angle) => {
   let wrapped = angle;
   while (wrapped > Math.PI) {
@@ -256,6 +334,11 @@ const prepareCritterTemplate = (rawTemplate) => {
       return;
     }
 
+    if (Array.isArray(node.material)) {
+      node.material = node.material.map((material) => applyCatRainbowEffect(material));
+    } else {
+      node.material = applyCatRainbowEffect(node.material);
+    }
     node.castShadow = true;
     node.receiveShadow = false;
   });
@@ -1134,6 +1217,7 @@ const animate = () => {
   shimmerMesh.position.copy(diceBody.position);
   shimmerMesh.quaternion.copy(diceBody.quaternion);
   shimmerUniforms.uTime.value += realDelta;
+  catRainbowUniforms.uTime.value += realDelta;
   updateCelebration(realDelta);
   updateFireworks(realDelta);
 
